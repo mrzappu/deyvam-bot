@@ -12,6 +12,9 @@ const {
   PermissionFlagsBits
 } = require('discord.js');
 
+// 🔴 FIX: Replace 'YOUR_TEST_SERVER_ID_HERE' with the ID of the server where you want to test commands.
+const TEST_GUILD_ID = '1435919529745059883'; 
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -27,7 +30,7 @@ let welcomeChannelId = null;
 let goodbyeChannelId = null;
 let voiceLogChannelId = null;
 
-// ===== Commands =====
+// ===== Commands (No changes here) =====
 const sayCommand = new SlashCommandBuilder()
   .setName('say')
   .setDescription('Make the bot say something')
@@ -83,13 +86,16 @@ const moveUserCommand = new SlashCommandBuilder()
   .addChannelOption(opt => opt.setName('channel').setDescription('Voice channel').setRequired(true))
   .setDefaultMemberPermissions(PermissionFlagsBits.MoveMembers);
 
-// ===== Register commands =====
+// ===== Register commands (FIX APPLIED HERE) =====
 client.once('ready', async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
 
   try {
     const rest = new REST({ version: '10' }).setToken(TOKEN);
-    await rest.put(Routes.applicationCommands(client.user.id), {
+
+    // 🔴 FIX: Using Routes.applicationGuildCommands for instant testing
+    // Change this back to Routes.applicationCommands(client.user.id) to deploy globally later.
+    await rest.put(Routes.applicationGuildCommands(client.user.id, TEST_GUILD_ID), {
       body: [
         sayCommand,
         setWelcomeCommand,
@@ -100,7 +106,7 @@ client.once('ready', async () => {
         moveUserCommand
       ].map(c => c.toJSON())
     });
-    console.log('📤 Slash commands registered');
+    console.log(`📤 Slash commands registered to Guild ID: ${TEST_GUILD_ID}`);
   } catch (err) {
     console.error('❌ Command registration failed:', err);
   }
@@ -120,7 +126,7 @@ function updateStatus() {
   });
 }
 
-// ===== Handle commands =====
+// ===== Handle commands (No changes here) =====
 client.on(Events.InteractionCreate, async interaction => {
   if (!interaction.isChatInputCommand()) return;
 
@@ -187,7 +193,7 @@ client.on(Events.InteractionCreate, async interaction => {
   }
 });
 
-// ===== Welcome embed =====
+// ===== Welcome embed (No changes here) =====
 client.on(Events.GuildMemberAdd, member => {
   const channel = welcomeChannelId
     ? member.guild.channels.cache.get(welcomeChannelId)
@@ -212,7 +218,7 @@ client.on(Events.GuildMemberAdd, member => {
   }
 });
 
-// ===== Goodbye embed =====
+// ===== Goodbye embed (No changes here) =====
 client.on(Events.GuildMemberRemove, member => {
   const channel = goodbyeChannelId
     ? member.guild.channels.cache.get(goodbyeChannelId)
@@ -236,7 +242,7 @@ client.on(Events.GuildMemberRemove, member => {
   }
 });
 
-// ===== Voice logs =====
+// ===== Voice logs (No changes here) =====
 client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
   if (!voiceLogChannelId) return;
   const logChannel = newState.guild.channels.cache.get(voiceLogChannelId);
@@ -284,7 +290,7 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
   }
 });
 
-// ===== Keep-alive =====
+// ===== Keep-alive (No changes here) =====
 express().get('/', (_, res) => res.send('Bot is online')).listen(PORT, () => {
   console.log(`🌐 Express running on port ${PORT}`);
 });
