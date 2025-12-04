@@ -14,7 +14,7 @@ const {
 } = require('discord.js');
 
 // 🔴 CONFIGURATION
-// Replace 'YOUR_TEST_SERVER_ID_HERE' with the ID of your main server.
+// Your Guild ID from the logs is used here for slash command registration
 const TEST_GUILD_ID = '1435919529745059883'; 
 
 const client = new Client({
@@ -29,6 +29,7 @@ const PORT = 3000;
 
 // ===== PERSISTENCE SETUP (FREE RENDER TIER) =====
 const SETTINGS_FILE = 'settings.json';
+// Load settings from Environment Variables (Render) or default to null
 let settings = {
     WELCOME_CHANNEL_ID: process.env.WELCOME_CHANNEL_ID || null,
     GOODBYE_CHANNEL_ID: process.env.GOODBYE_CHANNEL_ID || null,
@@ -36,7 +37,7 @@ let settings = {
 };
 
 /**
- * Saves settings locally for reference, but READS from environment variables in Render.
+ * Saves settings locally and prompts the user to update Render ENV vars.
  * @param {string} key - The setting key.
  * @param {string} value - The channel ID.
  */
@@ -44,7 +45,7 @@ function updateSetting(key, value) {
     // 1. Update the local variable
     settings[key] = value;
     
-    // 2. Write to local file (for the user to copy to Render)
+    // 2. Write to local file (for the user to copy/reference)
     fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2));
     
     console.log(`\n=============================================================`);
@@ -55,14 +56,13 @@ function updateSetting(key, value) {
 }
 
 /**
- * Retrieves setting, prioritizing the Render Environment Variables.
- * If running locally, it uses the local JSON.
+ * Retrieves setting, primarily using the Environment Variables set in Render.
  */
 function getSetting(key) {
     return settings[key];
 }
 
-// ===== Commands (Structure remains the same) =====
+// ===== Commands Definitions (No Changes) =====
 const sayCommand = new SlashCommandBuilder()
   .setName('say')
   .setDescription('Make the bot say something')
@@ -122,8 +122,8 @@ const moveUserCommand = new SlashCommandBuilder()
 client.once('ready', async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
 
-  // Initialization (reading from environment variables)
-  console.log(`Current Welcome Channel ID: ${settings.WELCOME_CHANNEL_ID || 'Not set'}`);
+  // Initialization check
+  console.log(`Current Welcome Channel ID: ${settings.WELCOME_CHANNEL_ID || 'Not set (Update ENV)'}`);
 
   try {
     const rest = new REST({ version: '10' }).setToken(TOKEN);
@@ -158,7 +158,7 @@ function updateStatus() {
   });
 }
 
-// ===== Handle commands (UPDATED for ENV Persistence) =====
+// ===== Handle commands (FIXED with Deferral for Timeout) =====
 client.on(Events.InteractionCreate, async interaction => {
   if (!interaction.isChatInputCommand()) return;
 
@@ -167,21 +167,36 @@ client.on(Events.InteractionCreate, async interaction => {
   }
 
   if (interaction.commandName === 'setwelcome') {
+    // FIX: Defer immediately to prevent Discord timeout (10062 error)
+    await interaction.deferReply({ ephemeral: true });
+    
     const channel = interaction.options.getChannel('channel');
     updateSetting('WELCOME_CHANNEL_ID', channel.id);
-    await interaction.reply(`✅ Welcome messages will now be sent in ${channel}. \n\n**🛑 WARNING:** **You MUST** manually update the \`WELCOME_CHANNEL_ID\` Environment Variable on Render to make this permanent.`);
+    
+    // Use editReply since we deferred earlier
+    await interaction.editReply(`✅ Welcome messages will now be sent in ${channel}. \n\n**🛑 WARNING:** **You MUST** manually update the \`WELCOME_CHANNEL_ID\` Environment Variable on Render to make this permanent.`);
   }
 
   if (interaction.commandName === 'setgoodbye') {
+    // FIX: Defer immediately
+    await interaction.deferReply({ ephemeral: true });
+    
     const channel = interaction.options.getChannel('channel');
     updateSetting('GOODBYE_CHANNEL_ID', channel.id);
-    await interaction.reply(`✅ Goodbye messages will now be sent in ${channel}. \n\n**🛑 WARNING:** **You MUST** manually update the \`GOODBYE_CHANNEL_ID\` Environment Variable on Render to make this permanent.`);
+    
+    // Use editReply
+    await interaction.editReply(`✅ Goodbye messages will now be sent in ${channel}. \n\n**🛑 WARNING:** **You MUST** manually update the \`GOODBYE_CHANNEL_ID\` Environment Variable on Render to make this permanent.`);
   }
 
   if (interaction.commandName === 'setvoicelog') {
+    // FIX: Defer immediately
+    await interaction.deferReply({ ephemeral: true });
+    
     const channel = interaction.options.getChannel('channel');
     updateSetting('VOICE_LOG_CHANNEL_ID', channel.id);
-    await interaction.reply(`✅ Voice logs will now be sent in ${channel}. \n\n**🛑 WARNING:** **You MUST** manually update the \`VOICE_LOG_CHANNEL_ID\` Environment Variable on Render to make this permanent.`);
+    
+    // Use editReply
+    await interaction.editReply(`✅ Voice logs will now be sent in ${channel}. \n\n**🛑 WARNING:** **You MUST** manually update the \`VOICE_LOG_CHANNEL_ID\` Environment Variable on Render to make this permanent.`);
   }
 
   if (interaction.commandName === 'kick') {
@@ -225,7 +240,7 @@ client.on(Events.InteractionCreate, async interaction => {
   }
 });
 
-// ===== Welcome embed (Reads from ENV) =====
+// ===== Welcome embed (Reads from ENV - Updated Theme) =====
 client.on(Events.GuildMemberAdd, async member => {
   const welcomeChannelId = getSetting('WELCOME_CHANNEL_ID');
   const channel = welcomeChannelId
@@ -234,7 +249,7 @@ client.on(Events.GuildMemberAdd, async member => {
 
   if (channel) {
     const embed = new EmbedBuilder()
-      .setColor(0x57F287) 
+      .setColor(0x57F287) // Green color
       .setTitle(`🎮 Welcome ${member.user.username} to **DEYVAM Gaming**! 🕹️`)
       .setDescription(
         "━━━━━━━━━━━━━━━━━━━━━\n" +
@@ -252,7 +267,7 @@ client.on(Events.GuildMemberAdd, async member => {
   }
 });
 
-// ===== Goodbye embed (Reads from ENV) =====
+// ===== Goodbye embed (Reads from ENV - Updated Theme) =====
 client.on(Events.GuildMemberRemove, async member => {
   const goodbyeChannelId = getSetting('GOODBYE_CHANNEL_ID');
   const channel = goodbyeChannelId
@@ -261,7 +276,7 @@ client.on(Events.GuildMemberRemove, async member => {
 
   if (channel) {
     const embed = new EmbedBuilder()
-      .setColor(0xED4245) 
+      .setColor(0xED4245) // Red color
       .setTitle(`🚪 ${member.user.tag} logged off from **DEYVAM Gaming**...`)
       .setDescription(
         "━━━━━━━━━━━━━━━━━━━━━\n" +
