@@ -10,18 +10,31 @@ const {
   Events,
   ActivityType,
   EmbedBuilder,
-  PermissionFlagsBits
+  PermissionFlagsBits,
+  // === IMPORTS FOR BUTTONS ===
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  InteractionType 
 } = require('discord.js');
 
 // 🔴 CONFIGURATION
-// Your Guild ID from the logs is used here for slash command registration
 const TEST_GUILD_ID = '1435919529745059883'; 
+
+// === NEW ROLE IDS (REPLACE THESE WITH YOUR ACTUAL DISCORD ROLE IDs) ===
+const ROLE_IDS = {
+    // 🛑 REPLACE 'REPLACE_WITH_YOUR_MOBILE_GAMER_ID' with the actual ID number!
+    MOBILE_GAMER: 'REPLACE_WITH_YOUR_MOBILE_GAMER_ID', 
+    // 🛑 REPLACE 'REPLACE_WITH_YOUR_PC_PLAYER_ID' with the actual ID number!
+    PC_PLAYER: 'REPLACE_WITH_YOUR_PC_PLAYER_ID',
+};
 
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMembers,
-    GatewayIntentBits.GuildVoiceStates
+    GatewayIntentBits.GuildVoiceStates,
+    GatewayIntentBits.MessageContent 
   ]
 });
 const TOKEN = process.env.TOKEN;
@@ -59,7 +72,7 @@ function getSetting(key) {
     return settings[key];
 }
 
-// ===== Commands Definitions (HELP COMMAND ADDED) =====
+// ===== Commands Definitions =====
 const helpCommand = new SlashCommandBuilder()
   .setName('help')
   .setDescription('Displays a list of all commands and features.');
@@ -119,24 +132,28 @@ const moveUserCommand = new SlashCommandBuilder()
   .addChannelOption(opt => opt.setName('channel').setDescription('Voice channel').setRequired(true))
   .setDefaultMemberPermissions(PermissionFlagsBits.MoveMembers);
 
+const setRolePanelCommand = new SlashCommandBuilder()
+  .setName('setrolepanel')
+  .setDescription('Creates the button-based self-role panel in the current channel.')
+  .setDefaultMemberPermissions(PermissionFlagsBits.Administrator); 
+
 // ===== Bot Ready Event =====
 client.once('ready', async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
-
-  console.log(`Current Welcome Channel ID: ${settings.WELCOME_CHANNEL_ID || 'Not set (Update ENV)'}`);
 
   try {
     const rest = new REST({ version: '10' }).setToken(TOKEN);
     await rest.put(Routes.applicationGuildCommands(client.user.id, TEST_GUILD_ID), {
       body: [
-        helpCommand, // <--- ADDED HELP COMMAND
+        helpCommand, 
         sayCommand,
         setWelcomeCommand,
         setGoodbyeCommand,
         setVoiceLogCommand,
         kickCommand,
         banCommand,
-        moveUserCommand
+        moveUserCommand,
+        setRolePanelCommand 
       ].map(c => c.toJSON())
     });
     console.log(`📤 Slash commands registered to Guild ID: ${TEST_GUILD_ID}`);
@@ -159,122 +176,208 @@ function updateStatus() {
   });
 }
 
-// ===== Handle commands (Includes HELP command) =====
+// ===== Handle commands and Button Interactions =====
 client.on(Events.InteractionCreate, async interaction => {
-  if (!interaction.isChatInputCommand()) return;
+  // --- HANDLE SLASH COMMANDS ---
+  if (interaction.isChatInputCommand()) {
+      
+      // --- HELP COMMAND HANDLER ---
+      if (interaction.commandName === 'help') {
+        const helpEmbed = new EmbedBuilder()
+            .setColor(0x0099FF)
+            .setTitle('🤖 DEYVAM Bot Command List')
+            .setDescription('Here is a list of commands you can use in the server.')
+            .setThumbnail(interaction.client.user.displayAvatarURL())
+            .addFields(
+                { 
+                    name: '⚙️ Configuration Commands (Admin)', 
+                    value: 
+                        '**/setwelcome #channel**: Set the channel for member arrival messages.\n' +
+                        '**/setgoodbye #channel**: Set the channel for member exit messages.\n' +
+                        '**/setvoicelog #channel**: Set the channel to log all voice activity (Join/Leave/Move/Mute/Stream).\n' +
+                        '**/setrolepanel**: Creates the self-role button panel in the current channel.\n\n' +
+                        '*Note: Settings require manual ENV variable updates to be permanent.*',
+                    inline: false 
+                },
+                { 
+                    name: '🛠️ Moderation Commands (Admin)', 
+                    value: 
+                        '**/kick @user [reason]**: Removes a member from the server.\n' +
+                        '**/ban @user [reason]**: Permanently bans a member from the server.\n' +
+                        '**/moveuser @user #channel**: Moves a user to a different voice channel.',
+                    inline: false 
+                },
+                { 
+                    name: '💬 General Commands', 
+                    value: 
+                        '**/say [message]**: Makes the bot repeat your message.\n' +
+                        '**/help**: Shows this command list.',
+                    inline: false 
+                }
+            )
+            .setFooter({ text: `Serving ${interaction.guild.memberCount} members in ${interaction.guild.name}` })
+            .setTimestamp();
+
+        await interaction.reply({ embeds: [helpEmbed], ephemeral: true });
+      }
+
+      // --- SET ROLE PANEL COMMAND HANDLER ---
+      if (interaction.commandName === 'setrolepanel') {
+          await interaction.deferReply({ ephemeral: true });
+
+          // 1. Create the embed
+          const rolePanelEmbed = new EmbedBuilder()
+              .setColor(0xF04747)
+              .setTitle('✨ Self-Assignable Roles')
+              .setDescription(
+                  'Click the buttons below to instantly add or remove the corresponding role.\n' +
+                  'Choose your platform or interests!\n\n' +
+                  '📱 **Mobile Gamer**: Role for players who primarily game on mobile platforms.\n' +
+                  '🖥️ **PC Player**: Role for players who primarily game on PC.'
+              )
+              .setFooter({ text: 'Clicking a button again removes the role!' })
+              .setTimestamp();
+
+          // 2. Create the buttons
+          const row = new ActionRowBuilder()
+              .addComponents(
+                  new ButtonBuilder()
+                      .setCustomId('role_mobile_gamer') // Custom ID for Mobile Gamer
+                      .setLabel('Mobile Gamer')
+                      .setStyle(ButtonStyle.Success) // Green
+                      .setEmoji('📱'),
+                  new ButtonBuilder()
+                      .setCustomId('role_pc_player') // Custom ID for PC Player
+                      .setLabel('PC Player')
+                      .setStyle(ButtonStyle.Primary) // Blue
+                      .setEmoji('🖥️'),
+              );
+
+          // 3. Send the message with the buttons
+          await interaction.channel.send({
+              embeds: [rolePanelEmbed],
+              components: [row]
+          });
+
+          await interaction.editReply({ content: '✅ Self-Role Panel created successfully!', ephemeral: true });
+      }
+
+      // --- OTHER SLASH COMMANDS ---
+      if (interaction.commandName === 'say') {
+          await interaction.reply(interaction.options.getString('message'));
+      }
+
+      if (interaction.commandName === 'setwelcome') {
+          await interaction.deferReply({ ephemeral: true });
+          const channel = interaction.options.getChannel('channel');
+          updateSetting('WELCOME_CHANNEL_ID', channel.id);
+          await interaction.editReply(`✅ Welcome messages will now be sent in ${channel}. \n\n**🛑 WARNING:** **You MUST** manually update the \`WELCOME_CHANNEL_ID\` Environment Variable on Render to make this permanent.`);
+      }
+
+      if (interaction.commandName === 'setgoodbye') {
+        await interaction.deferReply({ ephemeral: true });
+        const channel = interaction.options.getChannel('channel');
+        updateSetting('GOODBYE_CHANNEL_ID', channel.id);
+        await interaction.editReply(`✅ Goodbye messages will now be sent in ${channel}. \n\n**🛑 WARNING:** **You MUST** manually update the \`GOODBYE_CHANNEL_ID\` Environment Variable on Render to make this permanent.`);
+      }
+      
+      if (interaction.commandName === 'setvoicelog') {
+        await interaction.deferReply({ ephemeral: true });
+        const channel = interaction.options.getChannel('channel');
+        updateSetting('VOICE_LOG_CHANNEL_ID', channel.id);
+        await interaction.editReply(`✅ Voice logs will now be sent in ${channel}. \n\n**🛑 WARNING:** **You MUST** manually update the \`VOICE_LOG_CHANNEL_ID\` Environment Variable on Render to make this permanent.`);
+      }
+
+      if (interaction.commandName === 'kick') {
+        const target = interaction.options.getUser('target');
+        const reason = interaction.options.getString('reason') || 'No reason given';
+        const member = await interaction.guild.members.fetch(target.id).catch(() => null);
+        if (!member) return interaction.reply({ content: '❌ Member not found.', ephemeral: true });
+        try {
+          await member.kick(reason);
+          await interaction.reply(`✅ Kicked **${target.tag}**. Reason: ${reason}`);
+        } catch {
+          await interaction.reply({ content: '❌ Failed to kick. Check permissions.', ephemeral: true });
+        }
+      }
+
+      if (interaction.commandName === 'ban') {
+        const target = interaction.options.getUser('target');
+        const reason = interaction.options.getString('reason') || 'No reason given';
+        const member = await interaction.guild.members.fetch(target.id).catch(() => null);
+        if (!member) return interaction.reply({ content: '❌ Member not found.', ephemeral: true });
+        try {
+          await member.ban({ reason });
+          await interaction.reply(`✅ Banned **${target.tag}**. Reason: ${reason}`);
+        } catch {
+          await interaction.reply({ content: '❌ Failed to ban. Check permissions.', ephemeral: true });
+        }
+      }
+
+      if (interaction.commandName === 'moveuser') {
+        const target = interaction.options.getUser('target');
+        const channel = interaction.options.getChannel('channel');
+        if (channel.type !== 2) return interaction.reply({ content: '❌ Not a voice channel.', ephemeral: true });
+        const member = await interaction.guild.members.fetch(target.id).catch(() => null);
+        if (!member?.voice.channel) return interaction.reply({ content: '❌ Member not in VC.', ephemeral: true });
+        try {
+          await member.voice.setChannel(channel);
+          await interaction.reply(`✅ Moved **${target.tag}** to **${channel.name}**`);
+        } catch {
+          await interaction.reply({ content: '❌ Failed to move. Check permissions.', ephemeral: true });
+        }
+      }
+
+  } // End of isChatInputCommand check
   
-  // --- HELP COMMAND HANDLER ---
-  if (interaction.commandName === 'help') {
-    const helpEmbed = new EmbedBuilder()
-        .setColor(0x0099FF) // Bright blue
-        .setTitle('🤖 DEYVAM Bot Command List')
-        .setDescription('Here is a list of commands you can use in the server.')
-        .setThumbnail(interaction.client.user.displayAvatarURL())
-        .addFields(
-            { 
-                name: '⚙️ Configuration Commands (Admin)', 
-                value: 
-                    '**/setwelcome #channel**: Set the channel for member arrival messages.\n' +
-                    '**/setgoodbye #channel**: Set the channel for member exit messages.\n' +
-                    '**/setvoicelog #channel**: Set the channel to log all voice activity (Join/Leave/Move/Mute/Stream).\n\n' +
-                    '*Note: These settings require manual updates in Render ENV variables to be permanent.*',
-                inline: false 
-            },
-            { 
-                name: '🛠️ Moderation Commands (Admin)', 
-                value: 
-                    '**/kick @user [reason]**: Removes a member from the server.\n' +
-                    '**/ban @user [reason]**: Permanently bans a member from the server.\n' +
-                    '**/moveuser @user #channel**: Moves a user to a different voice channel.',
-                inline: false 
-            },
-            { 
-                name: '💬 General Commands', 
-                value: 
-                    '**/say [message]**: Makes the bot repeat your message.\n' +
-                    '**/help**: Shows this command list.',
-                inline: false 
-            }
-        )
-        .setFooter({ text: `Serving ${interaction.guild.memberCount} members in ${interaction.guild.name}` })
-        .setTimestamp();
+  // --- HANDLE BUTTON CLICKS (Self-Role Logic) ---
+  else if (interaction.type === InteractionType.MessageComponent && interaction.isButton()) {
+      if (interaction.customId.startsWith('role_')) {
+          await interaction.deferReply({ ephemeral: true }); 
 
-    // Use ephemeral: true so only the user who ran the command sees the help message
-    await interaction.reply({ embeds: [helpEmbed], ephemeral: true });
-  }
-  // --- END HELP COMMAND HANDLER ---
+          const member = interaction.member;
+          let roleId, roleName;
+          
+          switch (interaction.customId) {
+              case 'role_mobile_gamer':
+                  roleId = ROLE_IDS.MOBILE_GAMER;
+                  roleName = 'Mobile Gamer';
+                  break;
+              case 'role_pc_player':
+                  roleId = ROLE_IDS.PC_PLAYER;
+                  roleName = 'PC Player';
+                  break;
+              default:
+                  return interaction.editReply('❌ Unknown role button.');
+          }
+          
+          // Check if placeholder IDs are still in use
+          if (roleId === 'REPLACE_WITH_YOUR_MOBILE_GAMER_ID' || roleId === 'REPLACE_WITH_YOUR_PC_PLAYER_ID') {
+              return interaction.editReply(`❌ Error: You must replace the placeholder role ID for **${roleName}** in the bot's code (\`index.js\`) before this works.`);
+          }
 
-  if (interaction.commandName === 'say') {
-    await interaction.reply(interaction.options.getString('message'));
-  }
+          if (!member.roles) {
+               return interaction.editReply(`❌ Could not modify your roles.`);
+          }
 
-  if (interaction.commandName === 'setwelcome') {
-    await interaction.deferReply({ ephemeral: true });
-    
-    const channel = interaction.options.getChannel('channel');
-    updateSetting('WELCOME_CHANNEL_ID', channel.id);
-    
-    await interaction.editReply(`✅ Welcome messages will now be sent in ${channel}. \n\n**🛑 WARNING:** **You MUST** manually update the \`WELCOME_CHANNEL_ID\` Environment Variable on Render to make this permanent.`);
+          try {
+              if (member.roles.cache.has(roleId)) {
+                  // User has the role, so remove it
+                  await member.roles.remove(roleId);
+                  await interaction.editReply(`🔴 Removed the **${roleName}** role.`);
+              } else {
+                  // User doesn't have the role, so add it
+                  await member.roles.add(roleId);
+                  await interaction.editReply(`🟢 Added the **${roleName}** role!`);
+              }
+          } catch (error) {
+              console.error(`Error processing role for ${member.user.tag}:`, error);
+              await interaction.editReply(`❌ Failed to modify the role. Check the bot's permissions (Must have "Manage Roles" and the bot's role must be above the role being assigned).`);
+          }
+      }
   }
 
-  if (interaction.commandName === 'setgoodbye') {
-    await interaction.deferReply({ ephemeral: true });
-    
-    const channel = interaction.options.getChannel('channel');
-    updateSetting('GOODBYE_CHANNEL_ID', channel.id);
-    
-    await interaction.editReply(`✅ Goodbye messages will now be sent in ${channel}. \n\n**🛑 WARNING:** **You MUST** manually update the \`GOODBYE_CHANNEL_ID\` Environment Variable on Render to make this permanent.`);
-  }
-
-  if (interaction.commandName === 'setvoicelog') {
-    await interaction.deferReply({ ephemeral: true });
-    
-    const channel = interaction.options.getChannel('channel');
-    updateSetting('VOICE_LOG_CHANNEL_ID', channel.id);
-    
-    await interaction.editReply(`✅ Voice logs will now be sent in ${channel}. \n\n**🛑 WARNING:** **You MUST** manually update the \`VOICE_LOG_CHANNEL_ID\` Environment Variable on Render to make this permanent.`);
-  }
-
-  if (interaction.commandName === 'kick') {
-    const target = interaction.options.getUser('target');
-    const reason = interaction.options.getString('reason') || 'No reason given';
-    const member = await interaction.guild.members.fetch(target.id).catch(() => null);
-    if (!member) return interaction.reply({ content: '❌ Member not found.', ephemeral: true });
-    try {
-      await member.kick(reason);
-      await interaction.reply(`✅ Kicked **${target.tag}**. Reason: ${reason}`);
-    } catch {
-      await interaction.reply({ content: '❌ Failed to kick. Check permissions.', ephemeral: true });
-    }
-  }
-
-  if (interaction.commandName === 'ban') {
-    const target = interaction.options.getUser('target');
-    const reason = interaction.options.getString('reason') || 'No reason given';
-    const member = await interaction.guild.members.fetch(target.id).catch(() => null);
-    if (!member) return interaction.reply({ content: '❌ Member not found.', ephemeral: true });
-    try {
-      await member.ban({ reason });
-      await interaction.reply(`✅ Banned **${target.tag}**. Reason: ${reason}`);
-    } catch {
-      await interaction.reply({ content: '❌ Failed to ban. Check permissions.', ephemeral: true });
-    }
-  }
-
-  if (interaction.commandName === 'moveuser') {
-    const target = interaction.options.getUser('target');
-    const channel = interaction.options.getChannel('channel');
-    if (channel.type !== 2) return interaction.reply({ content: '❌ Not a voice channel.', ephemeral: true });
-    const member = await interaction.guild.members.fetch(target.id).catch(() => null);
-    if (!member?.voice.channel) return interaction.reply({ content: '❌ Member not in VC.', ephemeral: true });
-    try {
-      await member.voice.setChannel(channel);
-      await interaction.reply(`✅ Moved **${target.tag}** to **${channel.name}**`);
-    } catch {
-      await interaction.reply({ content: '❌ Failed to move. Check permissions.', ephemeral: true });
-    }
-  }
-});
+}); // End of InteractionCreate
 
 // ===== Welcome embed (Reads from ENV) =====
 client.on(Events.GuildMemberAdd, async member => {
