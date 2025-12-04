@@ -15,7 +15,7 @@ const {
 
 // 🔴 CONFIGURATION
 // Replace 'YOUR_TEST_SERVER_ID_HERE' with the ID of your main server.
-const TEST_GUILD_ID = 'YOUR_TEST_SERVER_ID_HERE'; 
+const TEST_GUILD_ID = '1435919529745059883'; 
 
 const client = new Client({
   intents: [
