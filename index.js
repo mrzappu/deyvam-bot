@@ -12,8 +12,9 @@ const {
   PermissionFlagsBits
 } = require('discord.js');
 
-// 🔴 FIX: Replace 'YOUR_TEST_SERVER_ID_HERE' with the ID of the server where you want to test commands.
-const TEST_GUILD_ID = '1435919529745059883'; 
+// 🔴 FIX & TEST: Replace 'YOUR_TEST_SERVER_ID_HERE' with the ID of the server where you want to test commands.
+// You can remove this line and change the rest.put call to deploy commands globally (up to 1 hour delay).
+const TEST_GUILD_ID = 'YOUR_TEST_SERVER_ID_HERE'; 
 
 const client = new Client({
   intents: [
@@ -30,7 +31,7 @@ let welcomeChannelId = null;
 let goodbyeChannelId = null;
 let voiceLogChannelId = null;
 
-// ===== Commands (No changes here) =====
+// ===== Commands =====
 const sayCommand = new SlashCommandBuilder()
   .setName('say')
   .setDescription('Make the bot say something')
@@ -86,15 +87,14 @@ const moveUserCommand = new SlashCommandBuilder()
   .addChannelOption(opt => opt.setName('channel').setDescription('Voice channel').setRequired(true))
   .setDefaultMemberPermissions(PermissionFlagsBits.MoveMembers);
 
-// ===== Register commands (FIX APPLIED HERE) =====
+// ===== Register commands =====
 client.once('ready', async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
 
   try {
     const rest = new REST({ version: '10' }).setToken(TOKEN);
 
-    // 🔴 FIX: Using Routes.applicationGuildCommands for instant testing
-    // Change this back to Routes.applicationCommands(client.user.id) to deploy globally later.
+    // FIX: Using applicationGuildCommands for instant loading on the TEST_GUILD_ID
     await rest.put(Routes.applicationGuildCommands(client.user.id, TEST_GUILD_ID), {
       body: [
         sayCommand,
@@ -117,7 +117,7 @@ client.once('ready', async () => {
 
 // ===== Dynamic Bot Status =====
 function updateStatus() {
-  const guild = client.guilds.cache.first(); // your REDEMPTION server
+  const guild = client.guilds.cache.first(); // your server
   if (!guild) return;
   const totalMembers = guild.memberCount;
   client.user.setPresence({
@@ -126,7 +126,7 @@ function updateStatus() {
   });
 }
 
-// ===== Handle commands (No changes here) =====
+// ===== Handle commands =====
 client.on(Events.InteractionCreate, async interaction => {
   if (!interaction.isChatInputCommand()) return;
 
@@ -193,7 +193,7 @@ client.on(Events.InteractionCreate, async interaction => {
   }
 });
 
-// ===== Welcome embed (No changes here) =====
+// ===== Welcome embed (UPDATED for Gaming Community) =====
 client.on(Events.GuildMemberAdd, member => {
   const channel = welcomeChannelId
     ? member.guild.channels.cache.get(welcomeChannelId)
@@ -201,24 +201,25 @@ client.on(Events.GuildMemberAdd, member => {
 
   if (channel) {
     const embed = new EmbedBuilder()
-      .setColor(0x57F287)
-      .setTitle(`👋 Hey ${member.user.username}, welcome to **DEYVAM** 🚗🔥`)
+      .setColor(0x57F287) // Green color
+      .setTitle(`🎮 Welcome ${member.user.username} to **DEYVAM Gaming**! 🕹️`)
       .setDescription(
-        "━━━━▣━━◤◢━━▣━━━━━\n" +
-        "📌 Make Sure To Read RP Rules 📌\n" +
-        "📌 Check Out Server Updates 📌\n" +
-        "━━━━▣━━◤◢━━▣━━━━━\n\n" +
-        "🛬 Enjoy your RP journey with us! 🚀✨"
+        "━━━━━━━━━━━━━━━━━━━━━\n" +
+        "📌 Check out the **#rules** channel first.\n" +
+        "📌 Grab a **role** in the **#roles** channel.\n" +
+        "📌 Hop into a voice channel and start gaming!\n" +
+        "━━━━━━━━━━━━━━━━━━━━━\n\n" +
+        "Get ready to grind with us! Let the games begin! 🚀✨"
       )
       .setThumbnail(member.guild.iconURL({ dynamic: true }))
-      .setFooter({ text: "DEYVAM • Limits 🌍" })
+      .setFooter({ text: "DEYVAM • Game On! 🌍" })
       .setTimestamp();
 
     channel.send({ content: `Welcome ${member.user}!`, embeds: [embed] });
   }
 });
 
-// ===== Goodbye embed (No changes here) =====
+// ===== Goodbye embed (UPDATED for Gaming Community) =====
 client.on(Events.GuildMemberRemove, member => {
   const channel = goodbyeChannelId
     ? member.guild.channels.cache.get(goodbyeChannelId)
@@ -226,23 +227,23 @@ client.on(Events.GuildMemberRemove, member => {
 
   if (channel) {
     const embed = new EmbedBuilder()
-      .setColor(0xED4245)
-      .setTitle(`💔 ${member.user.tag} just left **DEYVAM**...`)
+      .setColor(0xED4245) // Red color
+      .setTitle(`🚪 ${member.user.tag} logged off from **DEYVAM Gaming**...`)
       .setDescription(
-        "━━━━▣━━◤◢━━▣━━━━━\n" +
-        "We’ll miss your RP vibes ✈️\n" +
-        "Hope to see you back soon! 🚀\n" +
-        "━━━━▣━━◤◢━━▣━━━━━"
+        "━━━━━━━━━━━━━━━━━━━━━\n" +
+        "We lost a player! The lobby feels empty now. 💔\n" +
+        "We hope to see your high score again soon! 🎮\n" +
+        "━━━━━━━━━━━━━━━━━━━━━"
       )
       .setThumbnail(member.guild.iconURL({ dynamic: true }))
-      .setFooter({ text: "DEYVAM • Until We Meet Again 🌌" })
+      .setFooter({ text: "DEYVAM • AFK Mode 🌌" })
       .setTimestamp();
 
     channel.send({ embeds: [embed] });
   }
 });
 
-// ===== Voice logs (No changes here) =====
+// ===== Voice logs =====
 client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
   if (!voiceLogChannelId) return;
   const logChannel = newState.guild.channels.cache.get(voiceLogChannelId);
@@ -290,7 +291,7 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
   }
 });
 
-// ===== Keep-alive (No changes here) =====
+// ===== Keep-alive =====
 express().get('/', (_, res) => res.send('Bot is online')).listen(PORT, () => {
   console.log(`🌐 Express running on port ${PORT}`);
 });
