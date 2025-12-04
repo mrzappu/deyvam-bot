@@ -1,5 +1,6 @@
 require('dotenv').config();
 const express = require('express');
+const fs = require('fs'); // Node's filesystem module for settings.json
 const {
   Client,
   GatewayIntentBits,
@@ -11,12 +12,10 @@ const {
   EmbedBuilder,
   PermissionFlagsBits
 } = require('discord.js');
-const sqlite3 = require('sqlite3').verbose(); // Import SQLite
 
 // 🔴 CONFIGURATION
 // Replace 'YOUR_TEST_SERVER_ID_HERE' with the ID of your main server.
-const TEST_GUILD_ID = '1435919529745059883'; 
-const DB_FILE = 'my_deyvam.sql'; // The file where all settings are saved
+const TEST_GUILD_ID = 'YOUR_TEST_SERVER_ID_HERE'; 
 
 const client = new Client({
   intents: [
@@ -28,62 +27,42 @@ const client = new Client({
 const TOKEN = process.env.TOKEN;
 const PORT = 3000;
 
-// ===== Database Setup =====
-const db = new sqlite3.Database(DB_FILE);
+// ===== PERSISTENCE SETUP (FREE RENDER TIER) =====
+const SETTINGS_FILE = 'settings.json';
+let settings = {
+    WELCOME_CHANNEL_ID: process.env.WELCOME_CHANNEL_ID || null,
+    GOODBYE_CHANNEL_ID: process.env.GOODBYE_CHANNEL_ID || null,
+    VOICE_LOG_CHANNEL_ID: process.env.VOICE_LOG_CHANNEL_ID || null
+};
 
 /**
- * Initializes the database table if it doesn't exist.
- */
-function initDb() {
-    db.serialize(() => {
-        db.run(`CREATE TABLE IF NOT EXISTS settings (
-            guild_id TEXT PRIMARY KEY,
-            welcome_channel_id TEXT,
-            goodbye_channel_id TEXT,
-            voice_log_channel_id TEXT
-        )`);
-        // Ensure the entry for the main guild exists on first run
-        db.run(`INSERT OR IGNORE INTO settings (guild_id) VALUES (?)`, [TEST_GUILD_ID]);
-        console.log('📊 Database initialized and ready to use my_deyvam.sql.');
-    });
-}
-
-/**
- * Retrieves a single setting from the database for the given guild.
- * @param {string} key - The column name (e.g., 'welcome_channel_id')
- * @returns {Promise<string|null>} The channel ID or null
- */
-function getSetting(key) {
-    return new Promise((resolve, reject) => {
-        db.get(`SELECT ${key} FROM settings WHERE guild_id = ?`, [TEST_GUILD_ID], (err, row) => {
-            if (err) {
-                console.error(`DB Read Error (${key}):`, err);
-                return reject(err);
-            }
-            resolve(row ? row[key] : null);
-        });
-    });
-}
-
-/**
- * Updates a single setting in the database for the given guild.
- * @param {string} key - The column name (e.g., 'welcome_channel_id')
- * @param {string|null} value - The new channel ID or null
- * @returns {Promise<void>}
+ * Saves settings locally for reference, but READS from environment variables in Render.
+ * @param {string} key - The setting key.
+ * @param {string} value - The channel ID.
  */
 function updateSetting(key, value) {
-    return new Promise((resolve, reject) => {
-        db.run(`UPDATE settings SET ${key} = ? WHERE guild_id = ?`, [value, TEST_GUILD_ID], function(err) {
-            if (err) {
-                console.error(`DB Write Error (${key}):`, err);
-                return reject(err);
-            }
-            resolve();
-        });
-    });
+    // 1. Update the local variable
+    settings[key] = value;
+    
+    // 2. Write to local file (for the user to copy to Render)
+    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2));
+    
+    console.log(`\n=============================================================`);
+    console.log(`⚠️ ACTION REQUIRED: SETTING SAVED LOCALLY!`);
+    console.log(`Copy the new value for ${key} and paste it into your Render Environment Variables.`);
+    console.log(`New value for ${key}: ${value}`);
+    console.log(`=============================================================\n`);
 }
 
-// ===== Commands =====
+/**
+ * Retrieves setting, prioritizing the Render Environment Variables.
+ * If running locally, it uses the local JSON.
+ */
+function getSetting(key) {
+    return settings[key];
+}
+
+// ===== Commands (Structure remains the same) =====
 const sayCommand = new SlashCommandBuilder()
   .setName('say')
   .setDescription('Make the bot say something')
@@ -139,10 +118,12 @@ const moveUserCommand = new SlashCommandBuilder()
   .addChannelOption(opt => opt.setName('channel').setDescription('Voice channel').setRequired(true))
   .setDefaultMemberPermissions(PermissionFlagsBits.MoveMembers);
 
-// ===== Bot Ready Event (Includes DB Init) =====
+// ===== Bot Ready Event =====
 client.once('ready', async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
-  initDb(); // Initialize the database
+
+  // Initialization (reading from environment variables)
+  console.log(`Current Welcome Channel ID: ${settings.WELCOME_CHANNEL_ID || 'Not set'}`);
 
   try {
     const rest = new REST({ version: '10' }).setToken(TOKEN);
@@ -177,7 +158,7 @@ function updateStatus() {
   });
 }
 
-// ===== Handle commands (Uses DB for persistence) =====
+// ===== Handle commands (UPDATED for ENV Persistence) =====
 client.on(Events.InteractionCreate, async interaction => {
   if (!interaction.isChatInputCommand()) return;
 
@@ -187,20 +168,20 @@ client.on(Events.InteractionCreate, async interaction => {
 
   if (interaction.commandName === 'setwelcome') {
     const channel = interaction.options.getChannel('channel');
-    await updateSetting('welcome_channel_id', channel.id);
-    await interaction.reply(`✅ Welcome messages will now be sent in ${channel} and saved to **my_deyvam.sql**.`);
+    updateSetting('WELCOME_CHANNEL_ID', channel.id);
+    await interaction.reply(`✅ Welcome messages will now be sent in ${channel}. \n\n**🛑 WARNING:** **You MUST** manually update the \`WELCOME_CHANNEL_ID\` Environment Variable on Render to make this permanent.`);
   }
 
   if (interaction.commandName === 'setgoodbye') {
     const channel = interaction.options.getChannel('channel');
-    await updateSetting('goodbye_channel_id', channel.id);
-    await interaction.reply(`✅ Goodbye messages will now be sent in ${channel} and saved to **my_deyvam.sql**.`);
+    updateSetting('GOODBYE_CHANNEL_ID', channel.id);
+    await interaction.reply(`✅ Goodbye messages will now be sent in ${channel}. \n\n**🛑 WARNING:** **You MUST** manually update the \`GOODBYE_CHANNEL_ID\` Environment Variable on Render to make this permanent.`);
   }
 
   if (interaction.commandName === 'setvoicelog') {
     const channel = interaction.options.getChannel('channel');
-    await updateSetting('voice_log_channel_id', channel.id);
-    await interaction.reply(`✅ Voice logs will now be sent in ${channel} and saved to **my_deyvam.sql**.`);
+    updateSetting('VOICE_LOG_CHANNEL_ID', channel.id);
+    await interaction.reply(`✅ Voice logs will now be sent in ${channel}. \n\n**🛑 WARNING:** **You MUST** manually update the \`VOICE_LOG_CHANNEL_ID\` Environment Variable on Render to make this permanent.`);
   }
 
   if (interaction.commandName === 'kick') {
@@ -244,9 +225,9 @@ client.on(Events.InteractionCreate, async interaction => {
   }
 });
 
-// ===== Welcome embed (Reads from DB) =====
+// ===== Welcome embed (Reads from ENV) =====
 client.on(Events.GuildMemberAdd, async member => {
-  const welcomeChannelId = await getSetting('welcome_channel_id');
+  const welcomeChannelId = getSetting('WELCOME_CHANNEL_ID');
   const channel = welcomeChannelId
     ? member.guild.channels.cache.get(welcomeChannelId)
     : member.guild.systemChannel;
@@ -271,9 +252,9 @@ client.on(Events.GuildMemberAdd, async member => {
   }
 });
 
-// ===== Goodbye embed (Reads from DB) =====
+// ===== Goodbye embed (Reads from ENV) =====
 client.on(Events.GuildMemberRemove, async member => {
-  const goodbyeChannelId = await getSetting('goodbye_channel_id');
+  const goodbyeChannelId = getSetting('GOODBYE_CHANNEL_ID');
   const channel = goodbyeChannelId
     ? member.guild.channels.cache.get(goodbyeChannelId)
     : member.guild.systemChannel;
@@ -296,9 +277,9 @@ client.on(Events.GuildMemberRemove, async member => {
   }
 });
 
-// ===== Voice logs (Reads from DB and uses Embeds) =====
+// ===== Voice logs (Reads from ENV and uses Embeds) =====
 client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
-  const voiceLogChannelId = await getSetting('voice_log_channel_id');
+  const voiceLogChannelId = getSetting('VOICE_LOG_CHANNEL_ID');
   if (!voiceLogChannelId) return;
   
   const logChannel = newState.guild.channels.cache.get(voiceLogChannelId);
