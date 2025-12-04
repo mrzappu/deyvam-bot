@@ -11,22 +11,22 @@ const {
   ActivityType,
   EmbedBuilder,
   PermissionFlagsBits,
-  // === IMPORTS FOR BUTTONS ===
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
-  InteractionType 
+  InteractionType,
+  time
 } = require('discord.js');
 
 // 🔴 CONFIGURATION
 const TEST_GUILD_ID = '1435919529745059883'; 
 
-// === NEW ROLE IDS (REPLACE THESE WITH YOUR ACTUAL DISCORD ROLE IDs) ===
+// === NEW ROLE IDS (REPLACED PLACEHOLDERS WITH YOUR IDs) ===
 const ROLE_IDS = {
-    // 🛑 REPLACE 'REPLACE_WITH_YOUR_MOBILE_GAMER_ID' with the actual ID number!
+    // Mobile Gamer ID set
     MOBILE_GAMER: '1446186886963007606', 
-    // 🛑 REPLACE 'REPLACE_WITH_YOUR_PC_PLAYER_ID' with the actual ID number!
-    PC_PLAYER: '1446187229360816149D',
+    // PC Player ID set (Trailing 'D' removed for correct format)
+    PC_PLAYER: '1446187229360816149',
 };
 
 const client = new Client({
@@ -43,7 +43,6 @@ const PORT = 3000;
 // ===== PERSISTENCE SETUP (FREE RENDER TIER: Environment Variables) =====
 const SETTINGS_FILE = 'settings.json';
 
-// Load settings from Environment Variables (Render) or default to null
 let settings = {
     WELCOME_CHANNEL_ID: process.env.WELCOME_CHANNEL_ID || null,
     GOODBYE_CHANNEL_ID: process.env.GOODBYE_CHANNEL_ID || null,
@@ -225,7 +224,6 @@ client.on(Events.InteractionCreate, async interaction => {
       if (interaction.commandName === 'setrolepanel') {
           await interaction.deferReply({ ephemeral: true });
 
-          // 1. Create the embed
           const rolePanelEmbed = new EmbedBuilder()
               .setColor(0xF04747)
               .setTitle('✨ Self-Assignable Roles')
@@ -238,22 +236,20 @@ client.on(Events.InteractionCreate, async interaction => {
               .setFooter({ text: 'Clicking a button again removes the role!' })
               .setTimestamp();
 
-          // 2. Create the buttons
           const row = new ActionRowBuilder()
               .addComponents(
                   new ButtonBuilder()
-                      .setCustomId('role_mobile_gamer') // Custom ID for Mobile Gamer
+                      .setCustomId('role_mobile_gamer')
                       .setLabel('Mobile Gamer')
-                      .setStyle(ButtonStyle.Success) // Green
+                      .setStyle(ButtonStyle.Success)
                       .setEmoji('📱'),
                   new ButtonBuilder()
-                      .setCustomId('role_pc_player') // Custom ID for PC Player
+                      .setCustomId('role_pc_player')
                       .setLabel('PC Player')
-                      .setStyle(ButtonStyle.Primary) // Blue
+                      .setStyle(ButtonStyle.Primary)
                       .setEmoji('🖥️'),
               );
 
-          // 3. Send the message with the buttons
           await interaction.channel.send({
               embeds: [rolePanelEmbed],
               components: [row]
@@ -288,6 +284,7 @@ client.on(Events.InteractionCreate, async interaction => {
         await interaction.editReply(`✅ Voice logs will now be sent in ${channel}. \n\n**🛑 WARNING:** **You MUST** manually update the \`VOICE_LOG_CHANNEL_ID\` Environment Variable on Render to make this permanent.`);
       }
 
+      // --- KICK COMMAND ---
       if (interaction.commandName === 'kick') {
         const target = interaction.options.getUser('target');
         const reason = interaction.options.getString('reason') || 'No reason given';
@@ -295,12 +292,13 @@ client.on(Events.InteractionCreate, async interaction => {
         if (!member) return interaction.reply({ content: '❌ Member not found.', ephemeral: true });
         try {
           await member.kick(reason);
-          await interaction.reply(`✅ Kicked **${target.tag}**. Reason: ${reason}`);
+          await interaction.reply(`✅ Kicked **${target.tag}** (\`${target.id}\`). Reason: ${reason}`);
         } catch {
           await interaction.reply({ content: '❌ Failed to kick. Check permissions.', ephemeral: true });
         }
       }
 
+      // --- BAN COMMAND ---
       if (interaction.commandName === 'ban') {
         const target = interaction.options.getUser('target');
         const reason = interaction.options.getString('reason') || 'No reason given';
@@ -308,7 +306,7 @@ client.on(Events.InteractionCreate, async interaction => {
         if (!member) return interaction.reply({ content: '❌ Member not found.', ephemeral: true });
         try {
           await member.ban({ reason });
-          await interaction.reply(`✅ Banned **${target.tag}**. Reason: ${reason}`);
+          await interaction.reply(`✅ Banned **${target.tag}** (\`${target.id}\`). Reason: ${reason}`);
         } catch {
           await interaction.reply({ content: '❌ Failed to ban. Check permissions.', ephemeral: true });
         }
@@ -348,10 +346,12 @@ client.on(Events.InteractionCreate, async interaction => {
                   roleName = 'PC Player';
                   break;
               default:
+                  // Since we have hardcoded IDs now, this block should ideally not be hit unless the customId is unexpected
                   return interaction.editReply('❌ Unknown role button.');
           }
           
-          // Check if placeholder IDs are still in use
+          // Note: Since IDs are now hardcoded above, this specific placeholder check is technically redundant 
+          // but kept for safety if the user modified the ROLE_IDS object with placeholders again.
           if (roleId === 'REPLACE_WITH_YOUR_MOBILE_GAMER_ID' || roleId === 'REPLACE_WITH_YOUR_PC_PLAYER_ID') {
               return interaction.editReply(`❌ Error: You must replace the placeholder role ID for **${roleName}** in the bot's code (\`index.js\`) before this works.`);
           }
@@ -362,11 +362,9 @@ client.on(Events.InteractionCreate, async interaction => {
 
           try {
               if (member.roles.cache.has(roleId)) {
-                  // User has the role, so remove it
                   await member.roles.remove(roleId);
                   await interaction.editReply(`🔴 Removed the **${roleName}** role.`);
               } else {
-                  // User doesn't have the role, so add it
                   await member.roles.add(roleId);
                   await interaction.editReply(`🟢 Added the **${roleName}** role!`);
               }
@@ -379,7 +377,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
 }); // End of InteractionCreate
 
-// ===== Welcome embed (Reads from ENV) =====
+// ===== Welcome embed =====
 client.on(Events.GuildMemberAdd, async member => {
   const welcomeChannelId = getSetting('WELCOME_CHANNEL_ID');
   const channel = welcomeChannelId
@@ -395,9 +393,13 @@ client.on(Events.GuildMemberAdd, async member => {
         "📌 Check out the **#rules** channel first.\n" +
         "📌 Grab a **role** in the **#roles** channel.\n" +
         "📌 Hop into a voice channel and start gaming!\n" +
-        "━━━━━━━━━━━━━━━━━━━━━\n\n" +
-        "Get ready to grind with us! Let the games begin! 🚀✨"
+        "━━━━━━━━━━━━━━━━━━━━━"
       )
+      .addFields({
+        name: 'Account Created',
+        value: time(member.user.createdAt, 'R'), 
+        inline: true
+      })
       .setThumbnail(member.guild.iconURL({ dynamic: true }))
       .setFooter({ text: "DEYVAM • Game On! 🌍" })
       .setTimestamp();
@@ -406,7 +408,7 @@ client.on(Events.GuildMemberAdd, async member => {
   }
 });
 
-// ===== Goodbye embed (Reads from ENV) =====
+// ===== Goodbye embed =====
 client.on(Events.GuildMemberRemove, async member => {
   const goodbyeChannelId = getSetting('GOODBYE_CHANNEL_ID');
   const channel = goodbyeChannelId
@@ -431,7 +433,7 @@ client.on(Events.GuildMemberRemove, async member => {
   }
 });
 
-// ===== Voice logs (Reads from ENV and uses Enhanced Embeds) =====
+// ===== Voice logs (DM messages removed) =====
 client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
   const voiceLogChannelId = getSetting('VOICE_LOG_CHANNEL_ID');
   if (!voiceLogChannelId) return;
@@ -455,11 +457,13 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
   
   const BLURPLE = 0x5865F2;
   const YELLOW = 0xFEE75C;
+  const GREEN = 0x57F287;
+  const RED = 0xED4245;
 
   // 1. Member joined a VC
   if (!oldState.channelId && newState.channelId) {
     const embed = new EmbedBuilder()
-      .setColor(0x57F287) // Green
+      .setColor(GREEN) 
       .setAuthor({ name: `[CONNECT] ${userTag} connected`, iconURL: userAvatar })
       .setDescription(`**Member:** ${member} (\`${member.id}\`) has connected to voice.`)
       .addFields(
@@ -470,19 +474,12 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
       .setTimestamp();
       
     logChannel.send({ embeds: [embed] });
-
-    // DM user
-    try {
-      await member.send(`🎧 You have successfully joined the voice channel: **${newState.channel.name}** in ${newState.guild.name}.`);
-    } catch {
-      console.log(`❌ Could not DM ${userTag}`);
-    }
   }
 
   // 2. Member left a VC
   else if (oldState.channelId && !newState.channelId) {
     const embed = new EmbedBuilder()
-      .setColor(0xED4245) // Red
+      .setColor(RED) 
       .setAuthor({ name: `[DISCONNECT] ${userTag} disconnected`, iconURL: userAvatar })
       .setDescription(`**Member:** ${member} (\`${member.id}\`) has disconnected from voice.`)
       .addFields(
@@ -510,20 +507,12 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
       .setTimestamp();
       
     logChannel.send({ embeds: [embed] });
-
-    // DM user
-    try {
-      await member.send(`🔄 You have been moved to the voice channel: **${newState.channel.name}** in ${newState.guild.name}.`);
-    } catch {
-      console.log(`❌ Could not DM ${userTag}`);
-    }
   }
   
-  // 4. Mute/Deafen/Stream/Video updates (Now using embeds for all status changes)
+  // 4. Mute/Deafen/Stream/Video updates
   else if (oldState.channelId === newState.channelId) {
       const currentChannel = newState.channelId ? `<#${newState.channelId}>` : 'Unknown Channel';
       
-      // Helper function to generate and send status update embed
       const sendStatusEmbed = (statusType, isAdded, color, emojiOn, emojiOff) => {
           const action = isAdded ? 'ON' : 'OFF';
           const emoji = isAdded ? emojiOn : emojiOff;
