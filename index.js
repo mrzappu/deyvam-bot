@@ -11,10 +11,12 @@ const {
   EmbedBuilder,
   PermissionFlagsBits
 } = require('discord.js');
+const sqlite3 = require('sqlite3').verbose(); // Import SQLite
 
-// 🔴 FIX & TEST: Replace 'YOUR_TEST_SERVER_ID_HERE' with the ID of the server where you want to test commands.
-// You can remove this line and change the rest.put call to deploy commands globally (up to 1 hour delay).
+// 🔴 CONFIGURATION
+// Replace 'YOUR_TEST_SERVER_ID_HERE' with the ID of your main server.
 const TEST_GUILD_ID = 'YOUR_TEST_SERVER_ID_HERE'; 
+const DB_FILE = 'my_deyvam.sql'; // The file where all settings are saved
 
 const client = new Client({
   intents: [
@@ -26,10 +28,60 @@ const client = new Client({
 const TOKEN = process.env.TOKEN;
 const PORT = 3000;
 
-// ===== In-memory channel settings =====
-let welcomeChannelId = null;
-let goodbyeChannelId = null;
-let voiceLogChannelId = null;
+// ===== Database Setup =====
+const db = new sqlite3.Database(DB_FILE);
+
+/**
+ * Initializes the database table if it doesn't exist.
+ */
+function initDb() {
+    db.serialize(() => {
+        db.run(`CREATE TABLE IF NOT EXISTS settings (
+            guild_id TEXT PRIMARY KEY,
+            welcome_channel_id TEXT,
+            goodbye_channel_id TEXT,
+            voice_log_channel_id TEXT
+        )`);
+        // Ensure the entry for the main guild exists on first run
+        db.run(`INSERT OR IGNORE INTO settings (guild_id) VALUES (?)`, [TEST_GUILD_ID]);
+        console.log('📊 Database initialized and ready to use my_deyvam.sql.');
+    });
+}
+
+/**
+ * Retrieves a single setting from the database for the given guild.
+ * @param {string} key - The column name (e.g., 'welcome_channel_id')
+ * @returns {Promise<string|null>} The channel ID or null
+ */
+function getSetting(key) {
+    return new Promise((resolve, reject) => {
+        db.get(`SELECT ${key} FROM settings WHERE guild_id = ?`, [TEST_GUILD_ID], (err, row) => {
+            if (err) {
+                console.error(`DB Read Error (${key}):`, err);
+                return reject(err);
+            }
+            resolve(row ? row[key] : null);
+        });
+    });
+}
+
+/**
+ * Updates a single setting in the database for the given guild.
+ * @param {string} key - The column name (e.g., 'welcome_channel_id')
+ * @param {string|null} value - The new channel ID or null
+ * @returns {Promise<void>}
+ */
+function updateSetting(key, value) {
+    return new Promise((resolve, reject) => {
+        db.run(`UPDATE settings SET ${key} = ? WHERE guild_id = ?`, [value, TEST_GUILD_ID], function(err) {
+            if (err) {
+                console.error(`DB Write Error (${key}):`, err);
+                return reject(err);
+            }
+            resolve();
+        });
+    });
+}
 
 // ===== Commands =====
 const sayCommand = new SlashCommandBuilder()
@@ -87,14 +139,13 @@ const moveUserCommand = new SlashCommandBuilder()
   .addChannelOption(opt => opt.setName('channel').setDescription('Voice channel').setRequired(true))
   .setDefaultMemberPermissions(PermissionFlagsBits.MoveMembers);
 
-// ===== Register commands =====
+// ===== Bot Ready Event (Includes DB Init) =====
 client.once('ready', async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
+  initDb(); // Initialize the database
 
   try {
     const rest = new REST({ version: '10' }).setToken(TOKEN);
-
-    // FIX: Using applicationGuildCommands for instant loading on the TEST_GUILD_ID
     await rest.put(Routes.applicationGuildCommands(client.user.id, TEST_GUILD_ID), {
       body: [
         sayCommand,
@@ -115,9 +166,9 @@ client.once('ready', async () => {
   setInterval(updateStatus, 60000); // update every 1 minute
 });
 
-// ===== Dynamic Bot Status =====
+// ===== Dynamic Bot Status (Remains the same) =====
 function updateStatus() {
-  const guild = client.guilds.cache.first(); // your server
+  const guild = client.guilds.cache.first(); 
   if (!guild) return;
   const totalMembers = guild.memberCount;
   client.user.setPresence({
@@ -126,7 +177,7 @@ function updateStatus() {
   });
 }
 
-// ===== Handle commands =====
+// ===== Handle commands (Uses DB for persistence) =====
 client.on(Events.InteractionCreate, async interaction => {
   if (!interaction.isChatInputCommand()) return;
 
@@ -136,20 +187,20 @@ client.on(Events.InteractionCreate, async interaction => {
 
   if (interaction.commandName === 'setwelcome') {
     const channel = interaction.options.getChannel('channel');
-    welcomeChannelId = channel.id;
-    await interaction.reply(`✅ Welcome messages will now be sent in ${channel}`);
+    await updateSetting('welcome_channel_id', channel.id);
+    await interaction.reply(`✅ Welcome messages will now be sent in ${channel} and saved to **my_deyvam.sql**.`);
   }
 
   if (interaction.commandName === 'setgoodbye') {
     const channel = interaction.options.getChannel('channel');
-    goodbyeChannelId = channel.id;
-    await interaction.reply(`✅ Goodbye messages will now be sent in ${channel}`);
+    await updateSetting('goodbye_channel_id', channel.id);
+    await interaction.reply(`✅ Goodbye messages will now be sent in ${channel} and saved to **my_deyvam.sql**.`);
   }
 
   if (interaction.commandName === 'setvoicelog') {
     const channel = interaction.options.getChannel('channel');
-    voiceLogChannelId = channel.id;
-    await interaction.reply(`✅ Voice logs will now be sent in ${channel}`);
+    await updateSetting('voice_log_channel_id', channel.id);
+    await interaction.reply(`✅ Voice logs will now be sent in ${channel} and saved to **my_deyvam.sql**.`);
   }
 
   if (interaction.commandName === 'kick') {
@@ -193,15 +244,16 @@ client.on(Events.InteractionCreate, async interaction => {
   }
 });
 
-// ===== Welcome embed (UPDATED for Gaming Community) =====
-client.on(Events.GuildMemberAdd, member => {
+// ===== Welcome embed (Reads from DB) =====
+client.on(Events.GuildMemberAdd, async member => {
+  const welcomeChannelId = await getSetting('welcome_channel_id');
   const channel = welcomeChannelId
     ? member.guild.channels.cache.get(welcomeChannelId)
     : member.guild.systemChannel;
 
   if (channel) {
     const embed = new EmbedBuilder()
-      .setColor(0x57F287) // Green color
+      .setColor(0x57F287) 
       .setTitle(`🎮 Welcome ${member.user.username} to **DEYVAM Gaming**! 🕹️`)
       .setDescription(
         "━━━━━━━━━━━━━━━━━━━━━\n" +
@@ -219,15 +271,16 @@ client.on(Events.GuildMemberAdd, member => {
   }
 });
 
-// ===== Goodbye embed (UPDATED for Gaming Community) =====
-client.on(Events.GuildMemberRemove, member => {
+// ===== Goodbye embed (Reads from DB) =====
+client.on(Events.GuildMemberRemove, async member => {
+  const goodbyeChannelId = await getSetting('goodbye_channel_id');
   const channel = goodbyeChannelId
     ? member.guild.channels.cache.get(goodbyeChannelId)
     : member.guild.systemChannel;
 
   if (channel) {
     const embed = new EmbedBuilder()
-      .setColor(0xED4245) // Red color
+      .setColor(0xED4245) 
       .setTitle(`🚪 ${member.user.tag} logged off from **DEYVAM Gaming**...`)
       .setDescription(
         "━━━━━━━━━━━━━━━━━━━━━\n" +
@@ -243,53 +296,85 @@ client.on(Events.GuildMemberRemove, member => {
   }
 });
 
-// ===== Voice logs =====
+// ===== Voice logs (Reads from DB and uses Embeds) =====
 client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
+  const voiceLogChannelId = await getSetting('voice_log_channel_id');
   if (!voiceLogChannelId) return;
+  
   const logChannel = newState.guild.channels.cache.get(voiceLogChannelId);
   if (!logChannel) return;
 
-  // Member joined a VC
+  const member = newState.member;
+  const userTag = member.user.tag;
+  const userAvatar = member.user.displayAvatarURL({ dynamic: true });
+
+  // 1. Member joined a VC
   if (!oldState.channelId && newState.channelId) {
     const embed = new EmbedBuilder()
-      .setColor(0x57F287)
-      .setDescription(`✅ **${newState.member.user.tag}** joined **${newState.channel.name}**`)
+      .setColor(0x57F287) // Green
+      .setAuthor({ name: `${userTag} joined voice`, iconURL: userAvatar })
+      .setDescription(`**Member:** ${member} (${member.id})\n**Channel:** <#${newState.channelId}>`)
+      .setFooter({ text: `User ID: ${member.id}` })
       .setTimestamp();
+      
     logChannel.send({ embeds: [embed] });
 
     // DM user
     try {
-      await newState.member.send(`🎧 You just joined VC: **${newState.channel.name}**`);
+      await member.send(`🎧 You just joined VC: **${newState.channel.name}**`);
     } catch {
-      console.log(`❌ Could not DM ${newState.member.user.tag}`);
+      console.log(`❌ Could not DM ${userTag}`);
     }
   }
 
-  // Member left a VC
+  // 2. Member left a VC
   else if (oldState.channelId && !newState.channelId) {
     const embed = new EmbedBuilder()
-      .setColor(0xED4245)
-      .setDescription(`❌ **${oldState.member.user.tag}** left **${oldState.channel.name}**`)
+      .setColor(0xED4245) // Red
+      .setAuthor({ name: `${userTag} left voice`, iconURL: userAvatar })
+      .setDescription(`**Member:** ${member} (${member.id})\n**Channel:** ${oldState.channel.name} (<#${oldState.channelId}>)`)
+      .setFooter({ text: `User ID: ${member.id}` })
       .setTimestamp();
+      
     logChannel.send({ embeds: [embed] });
   }
 
-  // Member moved VC
+  // 3. Member moved VC
   else if (oldState.channelId !== newState.channelId) {
     const embed = new EmbedBuilder()
-      .setColor(0xFEE75C)
-      .setDescription(`🔄 **${newState.member.user.tag}** moved from **${oldState.channel.name}** ➝ **${newState.channel.name}**`)
+      .setColor(0xFEE75C) // Yellow
+      .setAuthor({ name: `${userTag} switched voice channel`, iconURL: userAvatar })
+      .setDescription(`**Member:** ${member} (${member.id})\n**Previous:** ${oldState.channel.name} (<#${oldState.channelId}>)\n**New:** <#${newState.channelId}>`)
+      .setFooter({ text: `User ID: ${member.id}` })
       .setTimestamp();
+      
     logChannel.send({ embeds: [embed] });
 
     // DM user
     try {
-      await newState.member.send(`🔄 You moved to VC: **${newState.channel.name}**`);
+      await member.send(`🔄 You moved to VC: **${newState.channel.name}**`);
     } catch {
-      console.log(`❌ Could not DM ${newState.member.user.tag}`);
+      console.log(`❌ Could not DM ${userTag}`);
     }
   }
+  
+  // 4. Mute/Deafen/Stream/Video updates
+  else if (oldState.channelId === newState.channelId) {
+      if (oldState.selfMute !== newState.selfMute) {
+          logChannel.send(`🔇 **${userTag}** ${newState.selfMute ? 'self-muted' : 'self-unmuted'} in <#${newState.channelId}>`);
+      }
+      if (oldState.selfDeaf !== newState.selfDeaf) {
+          logChannel.send(`🙉 **${userTag}** ${newState.selfDeaf ? 'self-deafened' : 'self-undeafened'} in <#${newState.channelId}>`);
+      }
+      if (oldState.streaming !== newState.streaming) {
+          logChannel.send(`📺 **${userTag}** ${newState.streaming ? 'started streaming' : 'stopped streaming'} in <#${newState.channelId}>`);
+      }
+      if (oldState.selfVideo !== newState.selfVideo) {
+          logChannel.send(`📹 **${userTag}** ${newState.selfVideo ? 'turned video on' : 'turned video off'} in <#${newState.channelId}>`);
+      }
+  }
 });
+
 
 // ===== Keep-alive =====
 express().get('/', (_, res) => res.send('Bot is online')).listen(PORT, () => {
