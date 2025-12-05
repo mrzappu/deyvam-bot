@@ -30,7 +30,7 @@ const ROLE_IDS = {
 };
 
 // ⚠️ IMPORTANT: REPLACE WITH YOUR MODERATOR/STAFF ROLE ID
-const STAFF_ROLE_ID = '1442895694242250943'; // <--- ⚠️ REPLACE this ID
+const STAFF_ROLE_ID = 'REPLACE_WITH_YOUR_MODERATOR_ROLE_ID'; // <--- ⚠️ REPLACE this ID
 
 const client = new Client({
   intents: [
@@ -116,7 +116,7 @@ const setVoiceLogCommand = new SlashCommandBuilder()
       .setRequired(true)
   );
 
-// --- NEW TICKET SETUP COMMANDS ---
+// --- TICKET SETUP COMMANDS ---
 const setTicketCategoryCommand = new SlashCommandBuilder()
     .setName('setticketcategory')
     .setDescription('Set the category where new tickets will be created.')
@@ -139,7 +139,13 @@ const setTicketLogCommand = new SlashCommandBuilder()
     )
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator);
 
-// --- NEW TICKET COMMAND ---
+// --- NEW TICKET PANEL SETUP COMMAND ---
+const setTicketPanelCommand = new SlashCommandBuilder()
+    .setName('setticketpanel')
+    .setDescription('Creates the "Open Ticket" panel message with a button in the current channel.')
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator); 
+
+// --- EXISTING TICKET COMMAND (kept for staff fallback) ---
 const ticketCommand = new SlashCommandBuilder()
     .setName('ticket')
     .setDescription('Manage support tickets.')
@@ -151,7 +157,7 @@ const ticketCommand = new SlashCommandBuilder()
                 option.setName('reason')
                     .setDescription('The reason for opening the ticket.')
                     .setRequired(false)))
-    .setDefaultMemberPermissions(null); // Everyone can create a ticket
+    .setDefaultMemberPermissions(null); 
 
 const kickCommand = new SlashCommandBuilder()
   .setName('kick')
@@ -171,7 +177,7 @@ const moveUserCommand = new SlashCommandBuilder()
   .setName('moveuser')
   .setDescription('Move a member to a voice channel')
   .addUserOption(opt => opt.setName('target').setDescription('The member').setRequired(true))
-  .addChannelOption(opt => opt.setName('channel').setDescription('Voice channel').setRequired(true))
+  .addChannelOption(opt => opt.setName('channel').setDescription('Voice channel').setRequired(true).addChannelTypes(ChannelType.GuildVoice, ChannelType.GuildStageVoice))
   .setDefaultMemberPermissions(PermissionFlagsBits.MoveMembers);
 
 const setRolePanelCommand = new SlashCommandBuilder()
@@ -192,9 +198,10 @@ client.once('ready', async () => {
         setWelcomeCommand,
         setGoodbyeCommand,
         setVoiceLogCommand,
-        setTicketCategoryCommand, // NEW
-        setTicketLogCommand, // NEW
-        ticketCommand, // NEW
+        setTicketCategoryCommand,
+        setTicketLogCommand,
+        setTicketPanelCommand, // ⬅️ NEW: Ticket Panel Command
+        ticketCommand,
         kickCommand,
         banCommand,
         moveUserCommand,
@@ -225,17 +232,14 @@ function updateStatus() {
  * Creates a text transcript of the ticket channel.
  */
 async function createTicketTranscript(channel, closer) {
-    // Fetch all messages in the channel (up to 100)
     const messages = await channel.messages.fetch({ limit: 100 });
     let transcriptContent = `Ticket Transcript for #${channel.name}\n`;
-    transcriptContent += `Opened by User ID: ${channel.topic}\n`; // User ID is stored in the topic
+    transcriptContent += `Opened by User ID: ${channel.topic}\n`; 
     transcriptContent += `Closed by: ${closer.tag} (${closer.id})\n`;
     transcriptContent += `Date Closed: ${new Date().toUTCString()}\n\n`;
     transcriptContent += '--- CONVERSATION ---\n\n';
 
-    // Reverse messages to show them chronologically (oldest first)
     messages.reverse().forEach(msg => {
-        // Skip bot's system messages (like the initial embed with buttons)
         if (msg.author.bot && msg.components.length > 0) return;
         
         const timestamp = new Date(msg.createdTimestamp).toLocaleString();
@@ -245,11 +249,92 @@ async function createTicketTranscript(channel, closer) {
         });
     });
 
-    // Save to a temporary file
     const fileName = `${channel.name}-${Date.now()}.txt`;
     const filePath = path.join(__dirname, fileName);
     fs.writeFileSync(filePath, transcriptContent, 'utf-8');
     return filePath;
+}
+
+/**
+ * Core function to create a new ticket channel.
+ * @param {GuildMember} member - The member opening the ticket.
+ * @param {string} reason - The reason for opening the ticket.
+ * @param {object} client - The Discord client.
+ * @returns {Promise<TextChannel>} The created ticket channel.
+ */
+async function createTicket(member, reason, client) {
+    const TICKET_CATEGORY_ID = getSetting('TICKET_CATEGORY_ID');
+    const TICKET_LOG_CHANNEL_ID = getSetting('TICKET_LOG_CHANNEL_ID');
+    const guild = member.guild;
+    
+    if (!TICKET_CATEGORY_ID) {
+        throw new Error('Ticket category not configured. Administrator must use /setticketcategory first.');
+    }
+
+    // 1. Check for existing ticket
+    const existingTicket = guild.channels.cache.find(c => c.topic === member.id && c.parentId === TICKET_CATEGORY_ID);
+    if (existingTicket) {
+        throw new Error(`You already have an active ticket open: ${existingTicket}`);
+    }
+
+    // 2. Create the private channel
+    const ticketChannel = await guild.channels.create({
+        name: `ticket-${member.user.username.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 15)}`,
+        type: ChannelType.GuildText,
+        topic: member.id, // Store user ID
+        parent: TICKET_CATEGORY_ID,
+        permissionOverwrites: [
+            { id: guild.id, deny: [PermissionFlagsBits.ViewChannel] },
+            { id: member.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
+            { id: STAFF_ROLE_ID, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
+        ],
+    });
+
+    // 3. Create Buttons
+    const claimButton = new ButtonBuilder()
+        .setCustomId('claim_ticket')
+        .setLabel('Claim')
+        .setStyle(ButtonStyle.Secondary)
+        .setEmoji('🙋');
+        
+    const closeButton = new ButtonBuilder()
+        .setCustomId('close_ticket')
+        .setLabel('Close')
+        .setStyle(ButtonStyle.Danger)
+        .setEmoji('🔒');
+
+    const row = new ActionRowBuilder().addComponents(claimButton, closeButton);
+
+    // 4. Initial Ticket Message
+    const ticketEmbed = new EmbedBuilder()
+        .setColor(0x0099ff)
+        .setTitle(`🎫 New Support Ticket Opened`)
+        .setDescription(`Welcome, ${member}! Our staff team has been notified.`)
+        .addFields(
+            { name: 'Opened By', value: `${member.user.tag}`, inline: true },
+            { name: 'Reason', value: reason }
+        )
+        .setFooter({ text: 'Staff: Click "Claim" to take this ticket.' })
+        .setTimestamp();
+
+    await ticketChannel.send({ content: `<@${member.id}> <@&${STAFF_ROLE_ID}>`, embeds: [ticketEmbed], components: [row] });
+
+    // 5. Log the creation
+    const logChannel = client.channels.cache.get(TICKET_LOG_CHANNEL_ID);
+    if (logChannel) {
+         const logEmbed = new EmbedBuilder()
+            .setColor(0x00ff00)
+            .setTitle('Ticket Created')
+            .setDescription(`User ${member} opened a new ticket: ${ticketChannel}`)
+            .addFields(
+                { name: 'Ticket ID', value: ticketChannel.id, inline: true },
+                { name: 'Reason', value: reason, inline: false }
+            )
+            .setTimestamp();
+         logChannel.send({ embeds: [logEmbed] });
+    }
+
+    return ticketChannel;
 }
 
 
@@ -258,7 +343,6 @@ client.on(Events.InteractionCreate, async interaction => {
   // --- HANDLE SLASH COMMANDS ---
   if (interaction.isChatInputCommand()) {
       
-      // --- HELP COMMAND HANDLER (UPDATED) ---
       if (interaction.commandName === 'help') {
         const helpEmbed = new EmbedBuilder()
             .setColor(0x0099FF)
@@ -271,9 +355,10 @@ client.on(Events.InteractionCreate, async interaction => {
                     value: 
                         '**/setwelcome #channel**: Set the channel for member arrival messages.\n' +
                         '**/setgoodbye #channel**: Set the channel for member exit messages.\n' +
-                        '**/setvoicelog #channel**: Set the channel to log all voice activity (Join/Leave/Move/Mute/Stream).\n' +
+                        '**/setvoicelog #channel**: Set the channel to log all voice activity.\n' +
                         '**/setticketcategory <category>**: Set the parent category for new tickets.\n' +
-                        '**/setticketlog #channel**: Set the channel for ticket transcripts and creation/closure logs.\n' +
+                        '**/setticketlog #channel**: Set the channel for ticket transcripts and logs.\n' +
+                        '**/setticketpanel**: Creates the "Open Ticket" button panel. ⬅️ NEW\n' +
                         '**/setrolepanel**: Creates the self-role button panel in the current channel.\n\n' +
                         '*Note: Settings require manual ENV variable updates to be permanent.*',
                     inline: false 
@@ -289,7 +374,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 { 
                     name: '💬 General & Utility Commands', 
                     value: 
-                        '**/ticket create [reason]**: Opens a private support ticket.\n' +
+                        '**/ticket create [reason]**: Opens a private support ticket (Staff fallback).\n' +
                         '**/say [message]**: Makes the bot repeat your message.\n' +
                         '**/help**: Shows this command list.',
                     inline: false 
@@ -301,7 +386,7 @@ client.on(Events.InteractionCreate, async interaction => {
         await interaction.reply({ embeds: [helpEmbed], ephemeral: true });
       }
 
-      // --- NEW TICKET SETUP HANDLERS ---
+      // --- TICKET SETUP HANDLERS ---
       if (interaction.commandName === 'setticketcategory') {
           await interaction.deferReply({ ephemeral: true });
           const category = interaction.options.getChannel('category');
@@ -315,92 +400,58 @@ client.on(Events.InteractionCreate, async interaction => {
           updateSetting('TICKET_LOG_CHANNEL_ID', channel.id);
           await interaction.editReply(`✅ Ticket logs will now be sent in ${channel}. \n\n**🛑 WARNING:** **You MUST** manually update the \`TICKET_LOG_CHANNEL_ID\` Environment Variable on Render to make this permanent.`);
       }
-
-      // --- TICKET CREATE HANDLER (ADVANCED) ---
-      if (interaction.commandName === 'ticket' && interaction.options.getSubcommand() === 'create') {
+      
+      // --- NEW TICKET PANEL COMMAND HANDLER ---
+      if (interaction.commandName === 'setticketpanel') {
           await interaction.deferReply({ ephemeral: true });
 
-          const TICKET_CATEGORY_ID = getSetting('TICKET_CATEGORY_ID');
-          if (!TICKET_CATEGORY_ID) {
-              return interaction.editReply('❌ Ticket system not configured. An administrator must use **/setticketcategory** first.');
-          }
-
-          const reason = interaction.options.getString('reason') || 'No reason provided.';
-          const member = interaction.member;
-          const guild = interaction.guild;
-          
-          // Check for an existing ticket by looking for a channel where the topic matches the user's ID
-          const existingTicket = guild.channels.cache.find(c => c.topic === member.id && c.parentId === TICKET_CATEGORY_ID);
-          if (existingTicket) {
-              return interaction.editReply(`❌ You already have an active ticket open: ${existingTicket}.`);
-          }
-
-          // Create the private channel
-          const ticketChannel = await guild.channels.create({
-              name: `ticket-${member.user.username.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 15)}`,
-              type: ChannelType.GuildText,
-              topic: member.id, // Store user ID for identification and close permissions
-              parent: TICKET_CATEGORY_ID,
-              permissionOverwrites: [
-                  // Deny @everyone access
-                  { id: guild.id, deny: [PermissionFlagsBits.ViewChannel] },
-                  // Allow the ticket creator access
-                  { id: member.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
-                  // Allow the Staff Role access
-                  { id: STAFF_ROLE_ID, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
-              ],
-          });
-
-          // Create Buttons
-          const claimButton = new ButtonBuilder()
-              .setCustomId('claim_ticket')
-              .setLabel('Claim')
-              .setStyle(ButtonStyle.Secondary)
-              .setEmoji('🙋');
-              
-          const closeButton = new ButtonBuilder()
-              .setCustomId('close_ticket')
-              .setLabel('Close')
-              .setStyle(ButtonStyle.Danger)
-              .setEmoji('🔒');
-
-          const row = new ActionRowBuilder().addComponents(claimButton, closeButton);
-
-          // Initial Ticket Message
-          const ticketEmbed = new EmbedBuilder()
-              .setColor(0x0099ff)
-              .setTitle(`🎫 New Support Ticket Opened`)
-              .setDescription(`Welcome, ${member}! Our staff team has been notified.`)
-              .addFields(
-                  { name: 'Opened By', value: `${member.user.tag}`, inline: true },
-                  { name: 'Reason', value: reason }
+          const panelEmbed = new EmbedBuilder()
+              .setColor(0x2ECC71)
+              .setTitle('💬 Need Support? Open a Ticket!')
+              .setDescription(
+                  'Click the button below to create a private support channel.\n' +
+                  'A staff member will be notified and will assist you shortly.'
               )
-              .setFooter({ text: 'Staff: Click "Claim" to take this ticket.' })
+              .addFields(
+                  { name: 'Rules', value: 'Please explain your issue clearly and be patient.', inline: false }
+              )
+              .setFooter({ text: 'Tickets are private between you and the staff team.' })
               .setTimestamp();
 
-          await ticketChannel.send({ content: `<@${member.id}> <@&${STAFF_ROLE_ID}>`, embeds: [ticketEmbed], components: [row] });
-          await interaction.editReply({ content: `✅ Your ticket has been created in ${ticketChannel}.` });
+          const openTicketButton = new ButtonBuilder()
+              .setCustomId('open_ticket') // CUSTOM ID for the new button
+              .setLabel('Open Ticket')
+              .setStyle(ButtonStyle.Success)
+              .setEmoji('🎫');
+              
+          const row = new ActionRowBuilder().addComponents(openTicketButton);
 
-          // Log the creation
-          const logChannel = client.channels.cache.get(getSetting('TICKET_LOG_CHANNEL_ID'));
-          if (logChannel) {
-               const logEmbed = new EmbedBuilder()
-                  .setColor(0x00ff00)
-                  .setTitle('Ticket Created')
-                  .setDescription(`User ${member} opened a new ticket: ${ticketChannel}`)
-                  .addFields(
-                      { name: 'Ticket ID', value: ticketChannel.id, inline: true },
-                      { name: 'Reason', value: reason, inline: false }
-                  )
-                  .setTimestamp();
-               logChannel.send({ embeds: [logEmbed] });
+          await interaction.channel.send({
+              embeds: [panelEmbed],
+              components: [row]
+          });
+
+          await interaction.editReply('✅ Ticket Panel message created successfully!');
+      }
+
+
+      // --- TICKET CREATE SLASH COMMAND HANDLER (Uses the new helper function) ---
+      if (interaction.commandName === 'ticket' && interaction.options.getSubcommand() === 'create') {
+          await interaction.deferReply({ ephemeral: true });
+          const reason = interaction.options.getString('reason') || 'No reason provided (Opened by slash command).';
+          
+          try {
+              const ticketChannel = await createTicket(interaction.member, reason, client);
+              await interaction.editReply({ content: `✅ Your ticket has been created in ${ticketChannel}.` });
+          } catch (error) {
+              await interaction.editReply(`❌ ${error.message}`);
           }
       }
 
       // --- EXISTING SLASH COMMANDS ---
       
       if (interaction.commandName === 'setrolepanel') {
-          // Send the role panel embed with buttons
+          // Logic for setting the role panel (kept as is)
           const rolePanelEmbed = new EmbedBuilder()
               .setColor(0x3498DB)
               .setTitle('🎮 Self-Assignable Roles')
@@ -489,7 +540,7 @@ client.on(Events.InteractionCreate, async interaction => {
       if (interaction.commandName === 'moveuser') {
         const target = interaction.options.getUser('target');
         const channel = interaction.options.getChannel('channel');
-        if (channel.type !== ChannelType.GuildVoice) return interaction.reply({ content: '❌ Not a voice channel.', ephemeral: true });
+        if (channel.type !== ChannelType.GuildVoice && channel.type !== ChannelType.GuildStageVoice) return interaction.reply({ content: '❌ Not a voice channel.', ephemeral: true });
         const member = await interaction.guild.members.fetch(target.id).catch(() => null);
         if (!member?.voice.channel) return interaction.reply({ content: '❌ Member not in VC.', ephemeral: true });
         try {
@@ -525,7 +576,6 @@ client.on(Events.InteractionCreate, async interaction => {
                   return interaction.editReply('❌ Unknown role button.');
           }
           
-          // Add/Remove Role Logic
           try {
               if (member.roles.cache.has(roleId)) {
                   await member.roles.remove(roleId);
@@ -540,9 +590,24 @@ client.on(Events.InteractionCreate, async interaction => {
           }
       }
 
+      // --- NEW: TICKET OPEN BUTTON LOGIC (Uses the new helper function) ---
+      else if (interaction.customId === 'open_ticket') {
+          await interaction.deferReply({ ephemeral: true }); 
+          
+          const reason = 'Opened via ticket panel button.';
+          
+          try {
+              const ticketChannel = await createTicket(interaction.member, reason, client);
+              await interaction.editReply({ content: `✅ Your ticket has been created in ${ticketChannel}.` });
+          } catch (error) {
+              // Handle the error thrown by createTicket (e.g., already open, category not set)
+              await interaction.editReply(`❌ ${error.message}`);
+          }
+      }
+
+
       // --- ADVANCED TICKET CLAIM LOGIC ---
       else if (interaction.customId === 'claim_ticket') {
-          // Check if user is staff
           if (!interaction.member.roles.cache.has(STAFF_ROLE_ID)) {
               return interaction.reply({ content: '❌ Only staff members can claim tickets.', ephemeral: true });
           }
@@ -550,7 +615,6 @@ client.on(Events.InteractionCreate, async interaction => {
           await interaction.deferReply();
           
           const channel = interaction.channel;
-          // Find the initial message (the one with the buttons)
           const messages = await channel.messages.fetch({ limit: 5 });
           const initialMessage = messages.find(m => m.components.length > 0 && m.components[0].components.some(c => c.customId === 'claim_ticket'));
 
@@ -558,20 +622,18 @@ client.on(Events.InteractionCreate, async interaction => {
                return interaction.editReply('❌ Could not find the initial ticket message to update.');
           }
 
-          // Modify channel permissions to hide it from other staff (optional: only allow the claiming staff member)
-          // For simplicity, we just hide the claim button here and mark it claimed.
-          
-          // Allow only the claiming user to view it from now on (removing the STAFF_ROLE_ID group access)
           try {
+             // Deny staff role access (so only the claimer and creator can see)
              await channel.permissionOverwrites.edit(STAFF_ROLE_ID, {
                 ViewChannel: false,
                 SendMessages: false,
              });
+             // Explicitly grant access to the claiming staff member
              await channel.permissionOverwrites.edit(interaction.user.id, {
                 ViewChannel: true,
                 SendMessages: true,
              });
-             // Also ensure the ticket creator still has access
+             // Also ensure the ticket creator still has access (ID stored in topic)
              if (channel.topic) {
                 await channel.permissionOverwrites.edit(channel.topic, {
                     ViewChannel: true,
@@ -617,7 +679,6 @@ client.on(Events.InteractionCreate, async interaction => {
           const channel = interaction.channel;
           const logChannel = client.channels.cache.get(getSetting('TICKET_LOG_CHANNEL_ID'));
           
-          // Permission Check: Must be staff OR the original ticket creator (stored in channel topic)
           const isStaff = interaction.member.roles.cache.has(STAFF_ROLE_ID);
           const isCreator = channel.topic === interaction.user.id;
           
@@ -630,10 +691,8 @@ client.on(Events.InteractionCreate, async interaction => {
           try {
               await channel.send(`🔒 Ticket is closing and transcript is being generated by ${closer.tag}...`);
 
-              // 1. Generate Transcript
               const transcriptFilePath = await createTicketTranscript(channel, closer);
               
-              // 2. Log and Send Transcript
               if (logChannel) {
                   const logEmbed = new EmbedBuilder()
                       .setColor(0xff0000)
@@ -645,16 +704,13 @@ client.on(Events.InteractionCreate, async interaction => {
                   await logChannel.send({ embeds: [logEmbed], files: [transcriptFilePath] });
               }
               
-              // 3. Delete Temp File
               fs.unlinkSync(transcriptFilePath);
 
-              // 4. Delete Channel
               await channel.delete(`Ticket closed by ${closer.tag}`);
 
           } catch (error) {
               console.error('Error during ticket closure:', error);
-              // Send a fallback message if channel deletion fails or logging fails
-              await interaction.editReply('❌ Failed to close ticket. The channel may need to be deleted manually, or the logging channel is misconfigured.');
+              await interaction.editReply('❌ Failed to close ticket. The channel may need to be deleted manually, or the logging channel is misconfigured. Check console for details.');
           }
       }
   }
@@ -717,7 +773,7 @@ client.on(Events.GuildMemberRemove, async member => {
     }
 });
 
-// ===== Voice logs (DM messages removed) =====
+// ===== Voice logs =====
 client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
     const voiceLogChannelId = getSetting('VOICE_LOG_CHANNEL_ID');
     if (!voiceLogChannelId) return;
