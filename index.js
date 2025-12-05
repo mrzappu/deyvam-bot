@@ -31,7 +31,7 @@ const ROLE_IDS = {
 };
 
 // ⚠️ IMPORTANT: REPLACE WITH YOUR MODERATOR/STAFF ROLE ID
-const STAFF_ROLE_ID = 'REPLACE_WITH_YOUR_MODERATOR_ROLE_ID'; // <--- 🛑 FIX THIS!
+const STAFF_ROLE_ID = '1442895694242250943'; // <--- 🛑 FIX THIS!
 
 const client = new Client({
   intents: [
