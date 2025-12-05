@@ -25,12 +25,13 @@ const TEST_GUILD_ID = '1435919529745059883'; // <--- ⚠️ REPLACE with your se
 
 // === IMPORTANT ROLE & STAFF IDS ===
 const ROLE_IDS = {
+    // These are placeholders from your context, ensure they are correct
     MOBILE_GAMER: '1446186886963007606', 
     PC_PLAYER: '1446187229360816149',
 };
 
 // ⚠️ IMPORTANT: REPLACE WITH YOUR MODERATOR/STAFF ROLE ID
-const STAFF_ROLE_ID = '1442895694242250943'; // <--- ⚠️ REPLACE this ID
+const STAFF_ROLE_ID = 'REPLACE_WITH_YOUR_MODERATOR_ROLE_ID'; // <--- 🛑 FIX THIS!
 
 const client = new Client({
   intents: [
@@ -46,7 +47,7 @@ const PORT = 3000;
 // ===== PERSISTENCE SETUP (FREE RENDER TIER: Environment Variables) =====
 const SETTINGS_FILE = 'settings.json';
 
-// --- UPDATED SETTINGS ---
+// --- UPDATED SETTINGS: Uses ENV variables for persistence ---
 let settings = {
     WELCOME_CHANNEL_ID: process.env.WELCOME_CHANNEL_ID || null,
     GOODBYE_CHANNEL_ID: process.env.GOODBYE_CHANNEL_ID || null,
@@ -61,6 +62,7 @@ let settings = {
 function updateSetting(key, value) {
     settings[key] = value;
     
+    // Save to settings.json
     fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2));
     
     console.log(`\n=============================================================`);
@@ -139,13 +141,11 @@ const setTicketLogCommand = new SlashCommandBuilder()
     )
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator);
 
-// --- NEW TICKET PANEL SETUP COMMAND ---
 const setTicketPanelCommand = new SlashCommandBuilder()
     .setName('setticketpanel')
     .setDescription('Creates the "Open Ticket" panel message with a button in the current channel.')
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator); 
 
-// --- EXISTING TICKET COMMAND (kept for staff fallback) ---
 const ticketCommand = new SlashCommandBuilder()
     .setName('ticket')
     .setDescription('Manage support tickets.')
@@ -157,7 +157,7 @@ const ticketCommand = new SlashCommandBuilder()
                 option.setName('reason')
                     .setDescription('The reason for opening the ticket.')
                     .setRequired(false)))
-    .setDefaultMemberPermissions(null); 
+    .setDefaultMemberPermissions(null); // Everyone can create a ticket
 
 const kickCommand = new SlashCommandBuilder()
   .setName('kick')
@@ -200,7 +200,7 @@ client.once('ready', async () => {
         setVoiceLogCommand,
         setTicketCategoryCommand,
         setTicketLogCommand,
-        setTicketPanelCommand, // ⬅️ NEW: Ticket Panel Command
+        setTicketPanelCommand,
         ticketCommand,
         kickCommand,
         banCommand,
@@ -257,10 +257,6 @@ async function createTicketTranscript(channel, closer) {
 
 /**
  * Core function to create a new ticket channel.
- * @param {GuildMember} member - The member opening the ticket.
- * @param {string} reason - The reason for opening the ticket.
- * @param {object} client - The Discord client.
- * @returns {Promise<TextChannel>} The created ticket channel.
  */
 async function createTicket(member, reason, client) {
     const TICKET_CATEGORY_ID = getSetting('TICKET_CATEGORY_ID');
@@ -268,7 +264,10 @@ async function createTicket(member, reason, client) {
     const guild = member.guild;
     
     if (!TICKET_CATEGORY_ID) {
-        throw new Error('Ticket category not configured. Administrator must use /setticketcategory first.');
+        throw new Error('Ticket system not configured. An administrator must use /setticketcategory first.');
+    }
+    if (STAFF_ROLE_ID === 'REPLACE_WITH_YOUR_MODERATOR_ROLE_ID') {
+         throw new Error('STAFF_ROLE_ID is not set in index.js. Please replace the placeholder.');
     }
 
     // 1. Check for existing ticket
@@ -345,6 +344,7 @@ client.on(Events.InteractionCreate, async interaction => {
       
       if (interaction.commandName === 'help') {
         const helpEmbed = new EmbedBuilder()
+            // ... (help embed definition)
             .setColor(0x0099FF)
             .setTitle('🤖 DEYVAM Bot Command List')
             .setDescription('Here is a list of commands you can use in the server.')
@@ -358,7 +358,7 @@ client.on(Events.InteractionCreate, async interaction => {
                         '**/setvoicelog #channel**: Set the channel to log all voice activity.\n' +
                         '**/setticketcategory <category>**: Set the parent category for new tickets.\n' +
                         '**/setticketlog #channel**: Set the channel for ticket transcripts and logs.\n' +
-                        '**/setticketpanel**: Creates the "Open Ticket" button panel. ⬅️ NEW\n' +
+                        '**/setticketpanel**: Creates the "Open Ticket" button panel.\n' +
                         '**/setrolepanel**: Creates the self-role button panel in the current channel.\n\n' +
                         '*Note: Settings require manual ENV variable updates to be permanent.*',
                     inline: false 
@@ -401,7 +401,6 @@ client.on(Events.InteractionCreate, async interaction => {
           await interaction.editReply(`✅ Ticket logs will now be sent in ${channel}. \n\n**🛑 WARNING:** **You MUST** manually update the \`TICKET_LOG_CHANNEL_ID\` Environment Variable on Render to make this permanent.`);
       }
       
-      // --- NEW TICKET PANEL COMMAND HANDLER ---
       if (interaction.commandName === 'setticketpanel') {
           await interaction.deferReply({ ephemeral: true });
 
@@ -419,7 +418,7 @@ client.on(Events.InteractionCreate, async interaction => {
               .setTimestamp();
 
           const openTicketButton = new ButtonBuilder()
-              .setCustomId('open_ticket') // CUSTOM ID for the new button
+              .setCustomId('open_ticket')
               .setLabel('Open Ticket')
               .setStyle(ButtonStyle.Success)
               .setEmoji('🎫');
@@ -435,7 +434,7 @@ client.on(Events.InteractionCreate, async interaction => {
       }
 
 
-      // --- TICKET CREATE SLASH COMMAND HANDLER (Uses the new helper function) ---
+      // --- TICKET CREATE SLASH COMMAND HANDLER ---
       if (interaction.commandName === 'ticket' && interaction.options.getSubcommand() === 'create') {
           await interaction.deferReply({ ephemeral: true });
           const reason = interaction.options.getString('reason') || 'No reason provided (Opened by slash command).';
@@ -448,10 +447,10 @@ client.on(Events.InteractionCreate, async interaction => {
           }
       }
 
-      // --- EXISTING SLASH COMMANDS ---
-      
+      // --- SET ROLE PANEL COMMAND HANDLER ---
       if (interaction.commandName === 'setrolepanel') {
-          // Logic for setting the role panel (kept as is)
+          await interaction.deferReply({ ephemeral: true });
+
           const rolePanelEmbed = new EmbedBuilder()
               .setColor(0x3498DB)
               .setTitle('🎮 Self-Assignable Roles')
@@ -476,10 +475,12 @@ client.on(Events.InteractionCreate, async interaction => {
 
           const row = new ActionRowBuilder().addComponents(mobileButton, pcButton);
 
-          await interaction.reply({
+          await interaction.channel.send({
               embeds: [rolePanelEmbed],
               components: [row]
           });
+          
+          await interaction.editReply({ content: '✅ Self-Role Panel created successfully!', ephemeral: true });
       }
       
       if (interaction.commandName === 'say') {
@@ -590,7 +591,7 @@ client.on(Events.InteractionCreate, async interaction => {
           }
       }
 
-      // --- NEW: TICKET OPEN BUTTON LOGIC (Uses the new helper function) ---
+      // --- TICKET OPEN BUTTON LOGIC ---
       else if (interaction.customId === 'open_ticket') {
           await interaction.deferReply({ ephemeral: true }); 
           
@@ -600,7 +601,6 @@ client.on(Events.InteractionCreate, async interaction => {
               const ticketChannel = await createTicket(interaction.member, reason, client);
               await interaction.editReply({ content: `✅ Your ticket has been created in ${ticketChannel}.` });
           } catch (error) {
-              // Handle the error thrown by createTicket (e.g., already open, category not set)
               await interaction.editReply(`❌ ${error.message}`);
           }
       }
