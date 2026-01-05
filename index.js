@@ -23,7 +23,7 @@ const {
 
 // 🔴 CONFIGURATION
 // Note: This ID is now only used for logging/reference, registration is global
-const TEST_GUILD_ID = '1435919529745059883'; 
+const TEST_GUILD_ID = '1456626927317291050'; 
 
 // === IMPORTANT ROLE & STAFF IDS ===
 const ROLE_IDS = {
